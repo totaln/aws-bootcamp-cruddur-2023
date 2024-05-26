@@ -1,10 +1,5 @@
 import json
 from bs4 import BeautifulSoup
-import urllib3
-
-http = urllib3.PoolManager()
-request = http.request('GET', 'https://hh.ru/resume/bc20b31cff02cb290a0039ed1f61314e795061')
-#request = http.request('GET', 'https://hh.ru/resume/283a0317ff09c641530039ed1f31664d39416e')
 
 def parse_page_source(html_content):
     # Parse the HTML content with BeautifulSoup
@@ -63,23 +58,16 @@ def parse_page_source(html_content):
         }
     
     resume_url = parsed_templates[0].get('authUrl', {}).get('backurl', '')
-    #resume id only
-    #source_id = resume_url.split('/')[-1] if resume_url else None
-    #1 assuming the current position is one with no endDate
     for job in resume.get('experience', {}).get('value', None):
         if job['endDate'] == None:
             company =  job['companyName']
             position = job['position']
     
-    #2 assuming the current position is first one in the list
-    # job = resume.get('experience', {}).get('value', None)[0]
-    # company =  job['companyName']
-    # position = job['position']
-    
     config = parsed_templates[0].get('config', {})
     image_resizing_cdn_host = config.get('imageResizingCdnHost', '')
     photo_url = resume.get('photoUrls', {}).get('value', None)[0].get('big',None)
-    print(resume.get('photoUrls', {}))
+
+    address = resume.get('area', {}).get('value', None).get('title', None)
 
     data = {
         "new": True,
@@ -103,7 +91,7 @@ def parse_page_source(html_content):
                 "email": email,
                 "skype_username": skype_text,
                 "linkedin": linkedin_url,
-                "telegram_username": None  # Assuming there's no 'telegram_username' key in the data
+                "telegram_username": None
             },
             "current_position": {
                 "position": position,
@@ -114,12 +102,43 @@ def parse_page_source(html_content):
             "source_id": None,
             "photo_file_uuid": image_resizing_cdn_host+photo_url,
             "resume": resume_url,
-            "address": None,
+            "address": address,
         }
     }
     return data
 
-# Call the function to parse and print the prettified JSON
-parsed_data = parse_page_source(request.data.decode('utf-8'))
+def load_json_source(file_path):
+    with open(file_path, 'r', encoding='utf-8') as file:
+        data = json.load(file)
+        page_source = data.get('extension_data', {}).get('requests', [{}])[0].get('body', {}).get('pageSource', '')
+        return parse_page_source(page_source)
 
-print(json.dumps(parsed_data, ensure_ascii=False, indent=2))
+def load_json_source(file_path):
+    with open(file_path, 'r', encoding='utf-8') as file:
+        data = json.load(file)
+        page_source = data.get('extension_data', {}).get('requests', [{}])[0].get('body', {}).get('pageSource', '')
+        return parse_page_source(page_source)
+
+
+#parse from JSON file
+def parse_from_file(file_name):
+    parsed_data = load_json_source(file_name)
+    return print(json.dumps(parsed_data, ensure_ascii=False, indent=2))
+
+
+#parse from hh link
+def parse_from_url(url):
+    import urllib3
+    from urllib3.exceptions import InsecureRequestWarning
+    urllib3.disable_warnings(InsecureRequestWarning)
+    http = urllib3.PoolManager()
+    request = http.request('GET', url)
+    parsed_data = parse_page_source(request.data.decode('utf-8'))
+    return print(json.dumps(parsed_data, ensure_ascii=False, indent=2))
+    
+
+parse_from_file('./applicant.json')
+#Tema
+parse_from_url('https://hh.ru/resume/283a0317ff09c641530039ed1f31664d39416e')
+# #Sanya
+# parse_from_url('https://hh.ru/resume/bc20b31cff02cb290a0039ed1f61314e795061')
