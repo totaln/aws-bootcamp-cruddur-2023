@@ -3,92 +3,83 @@ from bs4 import BeautifulSoup
 import urllib3
 
 http = urllib3.PoolManager()
+request = http.request('GET', 'https://hh.ru/resume/bc20b31cff02cb290a0039ed1f61314e795061')
+#request = http.request('GET', 'https://hh.ru/resume/283a0317ff09c641530039ed1f31664d39416e')
 
-def fetch_page_content(url):
-    try:
-        response = http.request('GET', url)
-        if response.status == 200:
-            return response.data.decode('utf-8')
-        else:
-            print(f"Failed to fetch page content: HTTP {response.status}")
-            return None
-    except Exception as e:
-        print(f"Error fetching page content: {e}")
-        return None
+def parse_page_source(html_content):
+    # Parse the HTML content with BeautifulSoup
+    soup = BeautifulSoup(html_content, 'html.parser')
+    
+    # Find the <template> tag and extract its content
+    template_tag = soup.find('template')
+    if template_tag:
+        template_content = template_tag.decode_contents()
+        try:
+            # Parse the JSON content inside the <template> tag
+            json_content = json.loads(template_content)
+            parsed_templates = [json_content]
+        except json.JSONDecodeError as e:
+            print(f"Failed to decode JSON inside <template> tag: {e}")
+            return
+    else:
+        print("No <template> tag found")
+        return
 
-def parse_json_from_template(template_content):
-    try:
-        json_content = json.loads(template_content)
-        return json_content
-    except json.JSONDecodeError as e:
-        print(f"Failed to decode JSON inside <template> tag: {e}")
-        return None
-
-def get_value(data, keys, default=None):
-    for key in keys:
-        if isinstance(data, list):
-            try:
-                data = data[key]
-            except (IndexError, TypeError):
-                return default
-        else:
-            data = data.get(key, {})
-    return data if data else default
-
-def get_contact_info(resume, contact_type):
-    return next((item.get('text') for item in resume.get('personalSite', {}).get('value', [])
-                 if item.get('type') == contact_type), None)
-
-def extract_resume_data(resume):
-    birth_date = {"year": None, "month": None, "day": None}
+    resume = parsed_templates[0].get('resume', {})
+    
+    last_name = resume.get('lastName', {}).get('value', None)
+    first_name = resume.get('firstName', {}).get('value', None)
+    middle_name = resume.get('middleName', {}).get('value', None)
+    
+    phone = None
+    if 'phone' in resume and 'value' in resume['phone']:
+        phone = resume['phone']['value'][0].get('formatted', None)
+        
+    email = resume.get('email', {}).get('value', None)
+    
+    skype_text = None
+    linkedin_url = None
+    for item in resume.get('personalSite', {}).get('value', []):
+        if item.get('type') == 'skype':
+            skype_text = item.get('text')
+        elif item.get('type') == 'linkedin':
+            linkedin_url = item.get('url')
+    
+    salary_value = resume.get('salary', {}).get('value', {})
+    salary = str(salary_value.get('amount', '')) if salary_value else None
+    
+    birth_date = {
+        "year": None,
+        "month": None,
+        "day": None
+    }
     birthday = resume.get('birthday', {}).get('value', None)
     if birthday:
         year, month, day = map(int, birthday.split('-'))
-        birth_date = {"year": year, "month": month, "day": day}
-
-    current_position = next((job for job in resume.get('experience', {}).get('value', [])
-                            if job.get('endDate') is None), {})
-    print(resume)
-    return {
-        "first_name": get_value(resume, ['firstName', 'value']),
-        "last_name": get_value(resume, ['lastName', 'value']),
-        "middle_name": get_value(resume, ['middleName', 'value']),
-        "contacts": {
-            "phone": get_value(resume, ['phone', 'value', 0, 'formatted']),
-            "email": get_value(resume, ['email', 'value']),
-            "skype_username": get_contact_info(resume, 'skype'),
-            "telegram_username": None
-        },
-        "current_position": {
-            "position": current_position.get('position'),
-            "company": current_position.get('companyName')
-        },
-        "salary": str(get_value(resume, ['salary', 'value', 'amount'], '')),
-        "birth_date": birth_date,
-        "source_id": None,
-        "photo_file_uuid": None,
-        "resume": get_value(resume, ['authUrl', 'backurl'], ''),
-        "address": None
-    }
-
-def parse_page_source(html_content):
-    soup = BeautifulSoup(html_content, 'html.parser')
-    template_tag = soup.find('template')
-    if not template_tag:
-        print("No <template> tag found")
-        return None
-
-    json_content = parse_json_from_template(template_tag.decode_contents())
-    if not json_content:
-        return None
-
-    resume = json_content.get('resume', {})
-    config = json_content.get('config', {})
+        birth_date = {
+            "year": year,
+            "month": month,
+            "day": day
+        }
+    
+    resume_url = parsed_templates[0].get('authUrl', {}).get('backurl', '')
+    #resume id only
+    #source_id = resume_url.split('/')[-1] if resume_url else None
+    #1 assuming the current position is one with no endDate
+    for job in resume.get('experience', {}).get('value', None):
+        if job['endDate'] == None:
+            company =  job['companyName']
+            position = job['position']
+    
+    #2 assuming the current position is first one in the list
+    # job = resume.get('experience', {}).get('value', None)[0]
+    # company =  job['companyName']
+    # position = job['position']
+    
+    config = parsed_templates[0].get('config', {})
     image_resizing_cdn_host = config.get('imageResizingCdnHost', '')
-    photo_url = get_value(resume, ['photoUrls', 'value', 0, 'big'])
-
-    applicant_data = extract_resume_data(resume)
-    applicant_data["photo_file_uuid"] = f"{image_resizing_cdn_host}{photo_url}" if photo_url else None
+    photo_url = resume.get('photoUrls', {}).get('value', None)[0].get('big',None)
+    print(resume.get('photoUrls', {}))
 
     data = {
         "new": True,
@@ -103,12 +94,32 @@ def parse_page_source(html_content):
                 "uuid": None
             }
         ],
-        "applicant": applicant_data
+        "applicant": {
+            "first_name": first_name,
+            "last_name": last_name,
+            "middle_name": middle_name,
+            "contacts": {
+                "phone": phone,
+                "email": email,
+                "skype_username": skype_text,
+                "linkedin": linkedin_url,
+                "telegram_username": None  # Assuming there's no 'telegram_username' key in the data
+            },
+            "current_position": {
+                "position": position,
+                "company": company
+            },
+            "salary": salary,
+            "birth_date": birth_date,
+            "source_id": None,
+            "photo_file_uuid": image_resizing_cdn_host+photo_url,
+            "resume": resume_url,
+            "address": None,
+        }
     }
-
     return data
 
-page_content = fetch_page_content('https://hh.ru/resume/bc20b31cff02cb290a0039ed1f61314e795061')
-if page_content:
-    parsed_data = parse_page_source(page_content)
-    print(json.dumps(parsed_data, ensure_ascii=False, indent=2))
+# Call the function to parse and print the prettified JSON
+parsed_data = parse_page_source(request.data.decode('utf-8'))
+
+print(json.dumps(parsed_data, ensure_ascii=False, indent=2))
