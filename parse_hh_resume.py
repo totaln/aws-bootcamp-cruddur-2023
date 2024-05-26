@@ -1,11 +1,12 @@
+
 import urllib3
 import re
 from bs4 import BeautifulSoup
 import json
 
 http = urllib3.PoolManager()
-request = http.request('GET', 'https://hh.ru/resume/%id%')
-
+#request = http.request('GET', 'https://hh.ru/resume/283a0317ff09c641530039ed1f31664d39416e')
+request = http.request('GET', 'https://hh.ru/resume/bc20b31cff02cb290a0039ed1f61314e795061')
 
 def parse_html_to_json(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
@@ -64,6 +65,16 @@ def parse_html_to_json(html_content):
             return text.strip()
         return None
 
+    def get_company_name():
+        # Try to get the company name from the bloko-text_strong class
+        company_name = get_text('.resume-block-container .bloko-text.bloko-text_strong a')
+        if not company_name:
+            company_name = get_text('.resume-block-container .bloko-text.bloko-text_strong')
+        return company_name
+
+    def get_position():
+        return get_text('[data-qa="resume-block-experience-position"]')
+
     full_name = get_text('[data-qa="resume-personal-name"]')
     if full_name:
         name_parts = full_name.split()
@@ -90,6 +101,8 @@ def parse_html_to_json(html_content):
         return None
         
     linkedin_url = get_linkedin('.resume-contact-linkedin')
+    company_name = get_company_name()
+    position = get_position()
 
     data = {
         "new": True,
@@ -116,8 +129,8 @@ def parse_html_to_json(html_content):
                 "telegram_username": get_telegram_username('[data-qa="resume-contacts-phone"] .bloko-translate-guard span')
             },
             "current_position": {
-                "position": get_text('[data-qa="resume-block-title-position"]'),
-                "company": None
+                "position": position,
+                "company": company_name
             },
             "salary": parse_salary('[data-qa="resume-block-salary"]'),
             "birth_date": birthday,
@@ -129,6 +142,32 @@ def parse_html_to_json(html_content):
     }
     return data
 
-# Parse the HTML and print JSON
-parsed_data = parse_html_to_json(request.data)
-print(json.dumps(parsed_data, ensure_ascii=False, indent=2))
+#1 parse from JSON
+def load_json_source(file_path):
+    with open(file_path, 'r', encoding='utf-8') as file:
+        data = json.load(file)
+        page_source = data.get('extension_data', {}).get('requests', [{}])[0].get('body', {}).get('pageSource', '')
+        return parse_html_to_json(page_source)
+
+#parse from JSON file
+def parse_from_file(file_name):
+    parsed_data = load_json_source(file_name)
+    return print(json.dumps(parsed_data, ensure_ascii=False, indent=2))
+
+
+#parse from hh link
+def parse_from_url(url):
+    import urllib3
+    from urllib3.exceptions import InsecureRequestWarning
+    urllib3.disable_warnings(InsecureRequestWarning)
+    http = urllib3.PoolManager()
+    request = http.request('GET', url)
+    parsed_data = parse_html_to_json(request.data.decode('utf-8'))
+    return print(json.dumps(parsed_data, ensure_ascii=False, indent=2))
+    
+
+parse_from_file('./applicant.json')
+#Tema
+parse_from_url('https://hh.ru/resume/283a0317ff09c641530039ed1f31664d39416e')
+# #Sanya
+# parse_from_url('https://hh.ru/resume/bc20b31cff02cb290a0039ed1f61314e795061')
